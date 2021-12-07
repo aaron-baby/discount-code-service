@@ -1,46 +1,62 @@
 # discount-code-service
+[Design](./design.md)
+## 1. Application setup
+```shell
+# Create a virtual environment to isolate our package dependencies locally
+python3 -m venv venv
+source venv/bin/activate  # On Windows use `env\Scripts\activate`
 
-## a. choices before the design (around 20 mins)
-while I am scanning the assignment, bunch of questions jump to my head, e.g.
-1. How many times a discount code can be used? only once or can be reused?
-2. Follow the previous question, the validation time for the discount code. 
-   1. for one time code, invalidate it after the using, do we consider activate it after cancel an order
-   2. for multiple times code, how many times can it be used?
-   3. what an expiration date for the code
-3. how to generate the code? the length of the code? (technical design)
-4. how much discount is applied? e.g. 90% or 70%, and the correlation between the discount number and the code
-   1. does the discount code can only be exclusive apply?
-5. the relationship between the code and the brand
-6. generated time and activated time of the code
+pip install --requirement requirements.txt
+```
 
-## b. break down the service to concrete pieces
-### how to generate the code
-take consideration of scalability, we may need generate a UUID
+## 2. Start a local redis instance
+```shell
+docker run --name discount-code-redis --rm -p6379:6379 -d redis
+```
 
-> As a brand I want to be notiﬁed about a user getting a discount code so that I can process information about the user for my loyalty programme.
+## 3. Run Flask Application
+```shell
+export FLASK_APP=flaskr
+export FLASK_ENV=development
+flask run
+```
+or run on an alternative port `5001`
 
-think of a messaging system, an event happened, dispatch this event to a watcher(Pub-Sub pattern)
+    flask run --port 5001
 
-To simplify, suppose I already have a `brand` object, a `user` object which contain the user's contact information.
-
-
-The aspects
-
-   ● APIs – anything HTTP based
-- so we need a `/generate_codes` API
-   which accept `brand` and `codes_number` as parameter, response the `status` of code generation.
-- secondly, a `/get_code` API, which accept a Authentication token in the header, and return a `code` as response.
-   in the programming side, we may create a relation between the code and user who request it. In this turn, we may use `Hash` data type which code as field,and user_id as value
-- thirdly, a `/activate_code` API, also need a user token for validation, and `code` as parameter, response provide information of the activation process.
-   
-   e.g. `status`=>['success', 'expired']
-
-     ● Data stores
-
-For Data stores, intuitively, I think can use Redis `Sets` as Data Store, as it is possible to add, remove, and test for existence of members in O(1)
-
-   ● Data validation – how and for what data
-
-   ● Async communication
-
-   ● Authentication
+## 4. Validate the endpoints
+### i) generate discount codes
+    curl http://127.0.0.1:5000/generate_codes\?brand_id\=1\&codes_number\=10
+While everything goes right, got below response
+```shell
+{
+  "generated_codes_number": 10
+}
+```
+Then open Redis client should see similar results
+```shell
+~ redis-cli
+127.0.0.1:6379> smembers brand:1
+ 1) "a074d1bb-128c-43ee-9b70-02ea5e894d78"
+ 2) "bd13006e-8cad-40b2-872e-445fe8003a0b"
+ 3) "768f7b11-dfe2-40ef-a21f-69fa5ef51c80"
+ 4) "9f26101c-b2e1-47f3-a2f6-b307532c26df"
+ 5) "2400ff6b-653e-40d9-aae3-5d4fe7b86508"
+ 6) "f3b4c684-cb1e-471f-8a20-24253df32987"
+ 7) "63a6f63d-9ea9-4391-9a73-145b59290422"
+ 8) "73f56230-be0a-468a-adcc-1b253441d9b7"
+ 9) "c8183415-0dce-46f5-b604-13dec99830f7"
+10) "54b654a4-d274-4e70-9d8e-c344da8f477a"
+```
+### ii) get a discount code
+```shell
+~ curl http://127.0.0.1:5000/get_code\?user_id\=1\&brand_id\=1
+{
+  "code": "768f7b11-dfe2-40ef-a21f-69fa5ef51c80"
+}
+```
+then one of the generated code should be moved out from `brand:{id}` to `brand:{id}_assigned`
+```shell
+127.0.0.1:6379> smembers brand:1_assigned
+1) "768f7b11-dfe2-40ef-a21f-69fa5ef51c80"
+```
